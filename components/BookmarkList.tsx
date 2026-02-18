@@ -1,9 +1,57 @@
 'use client'
-
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
 
-export default function BookmarkList({ bookmarks, setBookmarks }: any) {
+export default function BookmarkList({ bookmarks, setBookmarks, user }: any) {
 
+  // 🔥 Edit States
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editTitle, setEditTitle] = useState('')
+  const [editUrl, setEditUrl] = useState('')
+
+  // 🔥 Fetch Bookmarks
+  const fetchBookmarks = async () => {
+    if (!user) return
+
+    const { data, error } = await supabase
+      .from('bookmarks')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+
+    if (!error && data) {
+      setBookmarks(data)
+    }
+  }
+
+  // 🔥 Real-time Subscription
+  useEffect(() => {
+    if (!user) return
+
+    fetchBookmarks()
+
+    const channel = supabase
+      .channel('bookmarks-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bookmarks',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          fetchBookmarks()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [user])
+
+  // 🔥 Delete Bookmark
   const deleteBookmark = async (id: string) => {
     const { error } = await supabase
       .from('bookmarks')
@@ -14,6 +62,29 @@ export default function BookmarkList({ bookmarks, setBookmarks }: any) {
       setBookmarks((prev: any[]) =>
         prev.filter((bm) => bm.id !== id)
       )
+    }
+  }
+
+  // 🔥 Update Bookmark
+  const updateBookmark = async (id: string) => {
+    const { error } = await supabase
+      .from('bookmarks')
+      .update({
+        title: editTitle,
+        url: editUrl
+      })
+      .eq('id', id)
+
+    if (!error) {
+      setBookmarks((prev: any[]) =>
+        prev.map((bm) =>
+          bm.id === id
+            ? { ...bm, title: editTitle, url: editUrl }
+            : bm
+        )
+      )
+
+      setEditingId(null)
     }
   }
 
@@ -116,21 +187,61 @@ export default function BookmarkList({ bookmarks, setBookmarks }: any) {
 
         {bookmarks.map((bm: any) => (
           <div key={bm.id} className="bookmark-item">
-            <a
-              href={bm.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bookmark-link"
-            >
-              {bm.title}
-            </a>
 
-            <button
-              onClick={() => deleteBookmark(bm.id)}
-              className="bookmark-delete-btn"
-            >
-              Delete
-            </button>
+            {editingId === bm.id ? (
+              <>
+                <input
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  style={{ marginRight: '8px' }}
+                />
+
+                <input
+                  value={editUrl}
+                  onChange={(e) => setEditUrl(e.target.value)}
+                  style={{ marginRight: '8px' }}
+                />
+
+                <button
+                  onClick={() => updateBookmark(bm.id)}
+                  className="bookmark-delete-btn"
+                >
+                  Save
+                </button>
+              </>
+            ) : (
+              <>
+                <a
+                  href={bm.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bookmark-link"
+                >
+                  {bm.title}
+                </a>
+
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    onClick={() => {
+                      setEditingId(bm.id)
+                      setEditTitle(bm.title)
+                      setEditUrl(bm.url)
+                    }}
+                    className="bookmark-delete-btn"
+                  >
+                    Edit
+                  </button>
+
+                  <button
+                    onClick={() => deleteBookmark(bm.id)}
+                    className="bookmark-delete-btn"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
+
           </div>
         ))}
       </div>
